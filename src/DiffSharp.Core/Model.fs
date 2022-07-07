@@ -11,6 +11,16 @@ open System.Collections
 open System.Collections.Generic
 open System.Collections.Specialized
 
+type OptimizerSettings =
+    { LearningRate: Tensor
+      WeightDecay: Tensor }
+    member __.ofLR(lr) =
+        { LearningRate = lr
+          WeightDecay = dsharp.tensor 0.01 }
+
+    member __.ofWeightDecay(wd) =
+        { LearningRate = dsharp.tensor (1e-3)
+          WeightDecay = wd }
 
 /// <namespacedoc>
 ///   <summary>Contains types and functionality related to describing models.</summary>
@@ -20,7 +30,11 @@ open System.Collections.Specialized
 /// <remarks>A parameter is a mutable register holding a tensor.</remarks>
 type Parameter =
     val mutable value:Tensor
-    new(value) = {value=value}
+
+    val mutable optimizerSettings : OptimizerSettings option
+
+    new(value, optimizersettings) = {value=value; optimizerSettings = optimizersettings }
+    new(value) = {value = value; optimizerSettings = None}
 
     /// <summary>TBD</summary>
     member p.forwardDiff(derivative:Tensor, ?nestingTag:uint32) = p.value <- p.value.forwardDiff(derivative, ?nestingTag=nestingTag)
@@ -34,7 +48,7 @@ type Parameter =
     /// <summary>TBD</summary>
     member p.move(?device, ?dtype, ?backend) = p.value <- p.value.move(?device=device, ?dtype=dtype, ?backend=backend)
 
-    member p.copy() = Parameter(p.value.clone())
+    member p.copy() = Parameter(p.value.clone(), p.optimizerSettings)
 
     /// <summary>TBD</summary>
     override p.ToString() = sprintf "Parameter(shape: %A, value: %A)" (p.value.shape |> List.ofSeq) p.value

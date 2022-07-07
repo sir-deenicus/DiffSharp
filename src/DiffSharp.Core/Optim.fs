@@ -27,11 +27,11 @@ type Optimizer(model:Model) =
     /// <summary>TBD</summary>
     member o.step() = 
         o.stateStep <- o.stateStep + 1  // This order is crucial, we need first step to have o.stateStep = 1 before calling update rules
-        model.parameters.iter(fun (n, p) -> let t = o.updateRule n p.value in p.value <- t)
-
+        model.parameters.iter(fun (n, p) -> let t = o.updateRule n p.optimizerSettings p.value in p.value <- t)
+          
     /// <summary>TBD</summary>
-    abstract member updateRule: string -> Tensor -> Tensor
-
+    abstract member updateRule: string -> OptimizerSettings option -> Tensor -> Tensor 
+     
 
 /// <summary>TBD</summary>
 type SGD(model, ?lr:Tensor, ?momentum:Tensor, ?nesterov:bool, ?weightDecay:Tensor, ?reversible:bool) =
@@ -43,7 +43,7 @@ type SGD(model, ?lr:Tensor, ?momentum:Tensor, ?nesterov:bool, ?weightDecay:Tenso
     let mutable momBuffer = ParameterDict()
 
     /// <summary>TBD</summary>
-    override o.updateRule name t = 
+    override o.updateRule name _ t = 
         let mutable d = t.derivative
         let t = if reversible then t else t.primal
         match weightDecay with
@@ -75,7 +75,7 @@ type Adam(model, ?lr:Tensor, ?beta1:Tensor, ?beta2:Tensor, ?eps:Tensor, ?weightD
     let stateExpAvgSq = model.parameters.map(fun (p:Parameter) -> Parameter(p.value.zerosLike()))
 
     /// <summary>TBD</summary>
-    override o.updateRule name t =
+    override o.updateRule name _ t =
         let mutable d = t.derivative
         let t = if reversible then t else t.primal
         match weightDecay with
@@ -91,6 +91,52 @@ type Adam(model, ?lr:Tensor, ?beta1:Tensor, ?beta2:Tensor, ?eps:Tensor, ?weightD
         let stepSize = lr / biasCorrection1
         t - stepSize * (expAvg/denom)
 
+/// <summary>TBD</summary>
+type AdamW(model, ?weightDecay: Tensor, ?lr: Tensor, ?beta1: Tensor, ?beta2: Tensor, ?eps: Tensor, ?reversible: bool) =
+    inherit Optimizer(model)
+    let lr = defaultArg lr (dsharp.tensor (1e-3))
+    let weightDecay = defaultArg weightDecay (dsharp.tensor (0.01))
+    let beta1 = defaultArg beta1 (dsharp.tensor (0.9))
+    let beta2 = defaultArg beta2 (dsharp.tensor (0.999))
+    let eps = defaultArg eps (dsharp.tensor (1e-8))
+    let reversible = defaultArg reversible false
+
+    let stateExpAvg =
+        model.parameters.map (fun (p: Parameter) -> Parameter(p.value.zerosLike ()))
+
+    let stateExpAvgSq =
+        model.parameters.map (fun (p: Parameter) -> Parameter(p.value.zerosLike ()))
+
+    /// <summary>TBD</summary>
+    override o.updateRule name optsettings t =
+        let mutable d = t.derivative
+        let mutable t = if reversible then t else t.primal
+
+        let lr, wd =
+            match optsettings with
+            | None -> lr, weightDecay
+            | Some opts -> opts.LearningRate, opts.WeightDecay 
+
+        let expAvg =
+            stateExpAvg[name]
+                .mul(beta1)
+                .add (d * (1. - beta1))
+
+        let expAvgSq =
+            stateExpAvgSq[name]
+                .mul(beta2)
+                .add (d * d * (1. - beta2))
+
+        stateExpAvg[name] <- expAvg
+        stateExpAvgSq[name] <- expAvgSq
+        let biasCorrection1 = 1. - beta1 ** o.stateStep
+        let biasCorrection2 = 1. - beta2 ** o.stateStep 
+         
+        let denom = expAvgSq.sqrt().add(eps)
+        
+        let stepSize = lr * biasCorrection2.sqrt () / biasCorrection1  
+        t <- t - stepSize * (expAvg / denom)
+        t.mul (1 - lr * wd)             
 
 /// <summary>TBD</summary>
 type optim =

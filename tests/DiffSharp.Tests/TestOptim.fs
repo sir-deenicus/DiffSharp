@@ -98,6 +98,23 @@ type TestOptim () =
         Assert.True(targets.allclose(y, 0.1, 0.1))
 
     [<Test>]
+    member _.TestOptimModelAdamWStyle1 () =
+        // Trains a linear regressor
+        let net = Linear(din, dout)
+        let lr, epochs = 1e-2, 50
+        let optimizer = AdamW(net, lr=dsharp.tensor(lr))
+        for _ in 0..epochs do
+            for _, inputs, targets in dataloader.epoch() do
+                net.reverseDiff()
+                let y = net.forward(inputs)
+                let loss = dsharp.mseLoss(y, targets)
+                loss.reverse()
+                optimizer.step()
+                // printfn "%A" (float loss)
+        let y = net.forward inputs
+        Assert.True(targets.allclose(y, 0.1, 0.1))
+
+    [<Test>]
     member _.TestOptimModelAdamStyle2 () =
         // Trains a linear regressor
         let net = Linear(din, dout)
