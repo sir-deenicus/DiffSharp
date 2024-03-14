@@ -1520,7 +1520,13 @@ type dsharp with
     /// <param name="tensor">The output tensor.</param>
     static member reverse (value:Tensor) (tensor:Tensor) = tensor.reverse(value)
 
-    /// <summary>TBD</summary>
+    /// <summary>
+    /// Evaluate the forward-mode differentiation of a function at a given point.
+    /// </summary>
+    /// <param name="f">The function to differentiate.</param>
+    /// <param name="x">The point at which to evaluate the differentiation.</param>
+    /// <param name="v">The tangent vector.</param>
+    /// <returns>The primal and derivative values of the function at the given point.</returns>
     static member evalForwardDiff f x v =
         x |> dsharp.forwardDiff (GlobalNestingLevel.Next()) v |> f |> dsharp.primalDerivative
 
@@ -1579,14 +1585,33 @@ type dsharp with
 
     /// <summary>TBD</summary>
     static member gradv f x v = dsharp.fgradv f x v |> snd
-
-    /// <summary>TBD</summary>
+    
+    /// <summary>
+    /// Computes the derivative of a function `f` with respect to its input tensor `x`.
+    /// </summary>
+    /// <param name="f">A function of a scalar.</param>
+    /// <param name="x">A scalar tensor.</param>
+    /// <returns>
+    /// A tuple containing the value of `f` and the derivative of `f` with respect to `x`.
+    /// </returns>
+    /// <exception cref="System.Exception">Thrown when `x` is not a scalar tensor.</exception>
     static member fdiff f (x:Tensor) =
         let fx, d = dsharp.evalForwardDiff f x (x.onesLike())
         if x.dim <> 0 then failwithf "f must be a function of a scalar, encountered f:%A->%A" x.shape fx.shape
         fx, d
 
-    /// <summary>TBD</summary>
+    /// <summary>
+    /// Computes the derivative of a function `f` with respect to its input tensor `x`.
+    /// </summary>
+    /// <param name="f">A function of a scalar.</param>
+    /// <param name="x">A scalar tensor.</param>
+    /// <returns>
+    /// The derivative of `f` with respect to `x`.
+    /// </returns>
+    /// <exception cref="System.Exception">Thrown when `x` is not a scalar tensor.</exception>
+    /// <remarks>
+    /// This method is equivalent to `fdiff` but only returns the derivative.
+    /// </remarks>
     static member diff f x = dsharp.fdiff f x |> snd
 
     /// <summary>TBD</summary>
@@ -1635,16 +1660,34 @@ type dsharp with
     /// <summary>TBD</summary>
     static member jacobian f x = dsharp.fjacobian f x |> snd
 
-    /// <summary>TBD</summary>
+
+    /// <summary>
+    /// Computes the value of a scalar-valued function `f` and its gradient with respect to a tensor `x`.
+    /// </summary>
+    /// <param name="f">The scalar-valued function of a vector or scalar to compute the value and gradient of.</param>
+    /// <param name="x">The tensor to compute the value and gradient of `f` at.</param>
+    /// <returns>A tuple containing the value of `f` at `x` and a function that takes a tensor of the same shape as the value of `f` and computes the gradient of `f` with respect to `x`.</returns>
+    /// <exception cref="System.Exception">Thrown when `f` is not a scalar-valued function of a vector or scalar.</exception>
+    /// <remarks>If `x` is a scalar (i.e., has dimension 0), the function uses `fdiff` to compute the derivative of `f` with respect to `x`. Otherwise, the function uses `evalReverseDiff` to compute the value of `f` and its gradient with respect to `x`. The function checks that `f` is a scalar-valued function of a vector or scalar, and raises an exception if this is not the case.</remarks>
     static member fgrad f (x:Tensor) =
+        // Check if the input tensor `x` is a scalar (i.e., has dimension 0).
         if x.dim = 0 then 
+            // If `x` is a scalar, use the `fdiff` to compute the derivative of `f` with respect to `x`.
             dsharp.fdiff f x
         else
+            // If `x` is not a scalar, use the `evalReverseDiff` function to compute the value of `f` and its gradient with respect to `x`.
             let fx, r = dsharp.evalReverseDiff f x
+            // Check that `f` is a scalar-valued function of a vector or scalar.
             if x.dim > 1 || fx.dim <> 0 then failwithf "f must be a scalar-valued function of a vector or scalar, encountered f:%A->%A" x.shape fx.shape
+            // Return a tuple containing the value of `f` and a function `r` that takes a tensor of the same shape as `fx` (the value of `f`) and computes the gradient of `f` with respect to `x`.
             fx, r (fx.onesLike())
-
-    /// <summary>TBD</summary>
+ 
+    /// <summary>
+    /// Computes the gradient of a scalar-valued function `f` of a vector `x`.
+    /// </summary>
+    /// <param name="f">The scalar-valued function to compute the gradient of.</param>
+    /// <param name="x">The vector to compute the gradient of `f` at.</param>
+    /// <returns>A tuple containing the value of `f` at `x` and its gradient.</returns>
     static member grad f x = dsharp.fgrad f x |> snd
 
     /// <summary>TBD</summary>

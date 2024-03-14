@@ -91,7 +91,17 @@ type Adam(model, ?lr:Tensor, ?beta1:Tensor, ?beta2:Tensor, ?eps:Tensor, ?weightD
         let stepSize = lr / biasCorrection1
         t - stepSize * (expAvg/denom)
 
-/// <summary>TBD</summary>
+
+/// <summary>
+/// AdamW optimizer implementation.
+/// </summary>
+/// <param name="model">The model to optimize.</param>
+/// <param name="weightDecay">The weight decay value. Default is 0.01.</param>
+/// <param name="lr">The learning rate value. Default is 1e-3.</param>
+/// <param name="beta1">The beta1 value. Default is 0.9.</param>
+/// <param name="beta2">The beta2 value. Default is 0.999.</param>
+/// <param name="eps">The eps value. Default is 1e-8.</param>
+/// <param name="reversible">A boolean flag indicating whether to use reversible mode. Default is false.</param>
 type AdamW(model, ?weightDecay: Tensor, ?lr: Tensor, ?beta1: Tensor, ?beta2: Tensor, ?eps: Tensor, ?reversible: bool) =
     inherit Optimizer(model)
     let lr = defaultArg lr (dsharp.tensor (1e-3))
@@ -101,22 +111,35 @@ type AdamW(model, ?weightDecay: Tensor, ?lr: Tensor, ?beta1: Tensor, ?beta2: Ten
     let eps = defaultArg eps (dsharp.tensor (1e-8))
     let reversible = defaultArg reversible false
 
+    // Create two dictionaries to store the exponential moving average of the gradient and the squared exponential moving average of the gradient
     let stateExpAvg =
         model.parameters.map (fun (p: Parameter) -> Parameter(p.value.zerosLike ()))
 
     let stateExpAvgSq =
         model.parameters.map (fun (p: Parameter) -> Parameter(p.value.zerosLike ()))
-
-    /// <summary>TBD</summary>
-    override o.updateRule name optsettings t =
+ 
+    /// <summary>
+    /// Updates the tensor using the specified optimizer settings.
+    /// </summary>
+    /// <param name="name">The name of the tensor to update.</param>
+    /// <param name="optsettings">The optimizer settings to use for the update.</param>
+    /// <param name="t">The tensor to update.</param>
+    override o.updateRule name optsettings t = 
+        // Get the derivative of the tensor
         let mutable d = t.derivative
+        // Get the primal or reversible version of the tensor depending on the reversible flag
         let mutable t = if reversible then t else t.primal
 
+        // Get the learning rate and weight decay from the optimizer settings if provided, otherwise use the default values
         let lr, wd =
             match optsettings with
             | None -> lr, weightDecay
             | Some opts -> opts.LearningRate, opts.WeightDecay 
 
+        // Compute the weight decay term
+        t <- t.mul(1. - lr * wd)
+
+        // Compute the exponential moving average of the gradient and the squared exponential moving average of the gradient
         let expAvg =
             stateExpAvg[name]
                 .mul(beta1)
@@ -127,17 +150,24 @@ type AdamW(model, ?weightDecay: Tensor, ?lr: Tensor, ?beta1: Tensor, ?beta2: Ten
                 .mul(beta2)
                 .add (d * d * (1. - beta2))
 
+        // Update the state dictionaries with the new exponential moving averages
         stateExpAvg[name] <- expAvg
         stateExpAvgSq[name] <- expAvgSq
+
+        // Compute the bias correction terms for the exponential moving averages
         let biasCorrection1 = 1. - beta1 ** o.stateStep
         let biasCorrection2 = 1. - beta2 ** o.stateStep 
          
-        let denom = expAvgSq.sqrt().add(eps)
-        
-        let stepSize = lr * biasCorrection2.sqrt () / biasCorrection1  
-        t <- t - stepSize * (expAvg / denom)
-        t.mul (1 - lr * wd)             
+        let stepSize = lr / biasCorrection1  
 
+        // Compute the denominator for the update rule
+        let denom = (expAvgSq.sqrt() / biasCorrection2.sqrt()).add(eps)
+         
+        // Update the tensor using the AdamW update rule 
+        t - stepSize * (expAvg / denom) 
+        
+
+        
 /// <summary>TBD</summary>
 type optim =
 
@@ -321,3 +351,4 @@ type optim =
     static member adam(model, dataloader, loss, ?lr:Tensor, ?beta1:Tensor, ?beta2:Tensor, ?eps:Tensor, ?weightDecay:Tensor, ?reversible:bool, ?iters:int, ?epochs:int, ?threshold:double, ?print:bool, ?printEvery:int, ?printPrefix:string, ?printPostfix:string) =
         let optimizer = Adam(model, ?lr=lr, ?beta1=beta1, ?beta2=beta2, ?eps=eps, ?weightDecay=weightDecay, ?reversible=reversible)
         optim.optimizeModel(model, optimizer, dataloader, loss, ?iters=iters, ?epochs=epochs, ?threshold=threshold, ?print=print, ?printEvery=printEvery, ?printPrefix=printPrefix, ?printPostfix=printPostfix)
+ 
