@@ -26,7 +26,7 @@ module ImageUtil =
                         v, v, v
                     else
                         float32(pixels[0, y, x]), float32(pixels[1, y, x]), float32(pixels[2, y, x])
-                image.Item(x, y) <- PixelFormats.RgbaVector(r, g, b)
+                image[x, y] <- PixelFormats.RgbaVector(r, g, b)
         let fs = new FileStream(fileName, FileMode.Create)
         let encoder =
             if fileName.EndsWith(".jpg") then
@@ -45,13 +45,13 @@ module ImageUtil =
 
     /// Loads a pixel array from a file and optionally resizes it in the process. Resizing uses bicubic interpolation.
     let loadImage (fileName:string) (resize:option<int*int>) =
-        let image:Image<PixelFormats.RgbaVector> = Image.Load(fileName)
+        let image = Image.Load<PixelFormats.RgbaVector>(fileName)
         match resize with
             | Some(width, height) ->
                 if width < 0 || height < 0 then failwithf "Expecting width (%A) and height (%A) >= 0" width height
                 image.Mutate(Action<IImageProcessingContext>(fun x -> x.Resize(width, height) |> ignore))
             | None -> ()
-        let pixels = Array3D.init 3 image.Height image.Width (fun c y x -> let p = image.Item(x, y)
+        let pixels = Array3D.init 3 image.Height image.Width (fun c y x -> let p = image[x, y]
                                                                            if c = 0 then p.R
                                                                            elif c = 1 then p.G
                                                                            else p.B)

@@ -13,6 +13,7 @@ open System.IO
 open System.IO.Compression
 open System.Text
 open System.Net
+open System.Net.Http
 
 
 /// Contains auto-opened utilities related to the DiffSharp programming model.
@@ -24,10 +25,10 @@ module DataUtil =
         if File.Exists(localFileName) then
             printfn "File exists, skipping download: %A" localFileName
         else
-            let wc = new WebClient()
+            use client = new HttpClient()
             printfn "Downloading %A to %A" url localFileName
-            wc.DownloadFile(url, localFileName)
-            wc.Dispose()
+            let bytes = client.GetByteArrayAsync(url).GetAwaiter().GetResult()
+            File.WriteAllBytes(localFileName, bytes)
 
     let extractTarStream (stream:Stream) (outputDir:string) =
         // Tar standard: https://www.gnu.org/software/tar/manual/html_node/Standard.html
