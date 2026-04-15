@@ -1,0 +1,171 @@
+#load "HmcKernel.fsx"
+
+open DiffSharp
+open HmcKernel
+
+dsharp.config(backend=Backend.Reference, dtype=Dtype.Float64, device=Device.CPU)
+dsharp.seed(11)
+
+type Constraint =
+    | Unconstrained
+    | Positive
+
+type ParameterSpec =
+    {
+        Name: string
+        Initial: Tensor
+        Constraint: Constraint
+    }
+
+type ModelEnv =
+    {
+        Data: Map<string, Tensor>
+        Parameters: Map<string, Tensor>
+    }
+
+type ModelState =
+    {
+        Data: Map<string, Tensor>
+        Parameters: ParameterSpec list
+        Factors: (string * (ModelEnv -> Tensor)) list
+    }
+
+type CompiledModel =
+    {
+        InitialPosition: Tensor
+        LogDensity: Tensor -> Tensor
+        Decode: Tensor -> Map<string, Tensor>
+    }
+
+let scalar value = dsharp.tensor(value)
+let logSqrtTwoPi = scalar (0.5 * log (2.0 * System.Math.PI))
+
+let normalLogProb (mean: Tensor) (stddev: Tensor) (value: Tensor) =
+    let z = (value - mean) / stddev
+    (-0.5 * (z.pow(2.0))) - dsharp.log(stddev) - logSqrtTwoPi
+
+let private constrainedValue constraintKind raw =
+    match constraintKind with
+    | Unconstrained -> raw, scalar 0.0
+    | Positive ->
+        let value = dsharp.log(1.0 + dsharp.exp(raw))
+        let logJacobian = dsharp.log(dsharp.sigmoid(raw)) |> dsharp.sum
+        value, logJacobian
+
+let compileModel (state: ModelState) =
+    let initialPosition =
+        state.Parameters
+        |> List.map (fun spec -> spec.Initial.flatten())
+        |> dsharp.cat
+
+    let decodeWithJacobian (position: Tensor) =
+        let mutable offset = 0
+        let mutable totalLogJacobian = scalar 0.0
+
+        let parameters =
+            state.Parameters
+            |> List.map (fun spec ->
+                let count = spec.Initial.nelement
+                let raw = position[offset .. offset + count - 1].viewAs(spec.Initial)
+                offset <- offset + count
+
+                let value, logJacobian = constrainedValue spec.Constraint raw
+                totalLogJacobian <- totalLogJacobian + logJacobian
+                spec.Name, value)
+            |> Map.ofList
+
+        parameters, totalLogJacobian
+
+    let decode (position: Tensor) = decodeWithJacobian position |> fst
+
+    let logDensity (position: Tensor) =
+        let parameters, totalLogJacobian = decodeWithJacobian position
+        let env = { Data = state.Data; Parameters = parameters }
+        let baseTarget =
+            state.Factors
+            |> List.fold (fun acc (_, factor) -> acc + factor env) (scalar 0.0)
+
+        baseTarget + totalLogJacobian
+
+    {
+        InitialPosition = initialPosition
+        LogDensity = logDensity
+        Decode = decode
+    }
+
+type StanSketchBuilder() =
+    member _.Yield(()) =
+        {
+            Data = Map.empty
+            Parameters = []
+            Factors = []
+        }
+
+    [<CustomOperation("data")>]
+    member _.Data(state: ModelState, name, value) =
+        { state with Data = state.Data.Add(name, value) }
+
+    [<CustomOperation("parameter")>]
+    member _.Parameter(state: ModelState, name, initial, constraintKind) =
+        let spec = { Name = name; Initial = initial; Constraint = constraintKind }
+        { state with Parameters = state.Parameters @ [ spec ] }
+
+    [<CustomOperation("factor")>]
+    member _.Factor(state: ModelState, name, logTerm: ModelEnv -> Tensor) =
+        { state with Factors = state.Factors @ [ name, logTerm ] }
+
+    member _.Run(state) = compileModel state
+
+let stan = StanSketchBuilder()
+
+let x = dsharp.tensor([ for i in -12 .. 12 -> float i / 6.0 ])
+let trueAlpha = scalar -0.4
+let trueBeta = scalar 1.1
+let trueSigma = scalar 0.25
+let y = trueAlpha + trueBeta * x + trueSigma * dsharp.randnLike(x)
+
+let model =
+    stan {
+        data "x" x
+        data "y" y
+
+        parameter "alpha" (scalar 0.0) Unconstrained
+        parameter "beta" (scalar 0.0) Unconstrained
+        parameter "sigma" (scalar -1.0) Positive
+
+        factor "alpha prior" (fun env ->
+            normalLogProb (scalar 0.0) (scalar 1.5) env.Parameters.["alpha"])
+
+        factor "beta prior" (fun env ->
+            normalLogProb (scalar 0.0) (scalar 1.5) env.Parameters.["beta"])
+
+        factor "sigma prior" (fun env ->
+            normalLogProb (scalar 0.0) (scalar 0.75) env.Parameters.["sigma"])
+
+        factor "likelihood" (fun env ->
+            let alpha = env.Parameters.["alpha"]
+            let beta = env.Parameters.["beta"]
+            let sigma = env.Parameters.["sigma"]
+            let mean = alpha + beta * env.Data.["x"]
+            normalLogProb mean sigma env.Data.["y"] |> dsharp.sum)
+    }
+
+let config: HmcKernel.Config =
+    {
+        StepSize = 0.03
+        LeapfrogSteps = 24
+        BurnIn = 600
+        SampleCount = 1200
+        Mass = None
+        Adaptation = Some HmcKernel.defaultAdaptation
+    }
+
+let chain = HmcKernel.sample model.LogDensity model.InitialPosition config
+let unconstrainedMean = HmcKernel.sampleMean chain
+let decodedMean = model.Decode unconstrainedMean
+
+printfn "Acceptance rate: %.3f" chain.Diagnostics.AcceptanceRate
+printfn "Posterior alpha: %A" decodedMean.["alpha"]
+printfn "Posterior beta:  %A" decodedMean.["beta"]
+printfn "Posterior sigma: %A" decodedMean.["sigma"]
+printfn "Ground truth:    %A" (Map.ofList [ "alpha", trueAlpha; "beta", trueBeta; "sigma", trueSigma ])
