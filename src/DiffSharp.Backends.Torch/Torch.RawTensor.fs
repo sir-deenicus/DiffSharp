@@ -13,6 +13,7 @@ open TorchSharp
 open type torch 
 open Microsoft.FSharp.Core 
 
+type torch_cuda = torch.cuda
 type TorchShape = int64[]
 type TorchDevice = Torch.Device
 type Device = DiffSharp.Device
@@ -479,7 +480,7 @@ type TorchRawTensor(tt: torch.Tensor, shape: Shape, dtype: Dtype, device: Device
         t1.MakeLike(result, dtype=Dtype.Bool)
 
     override t.MaxReduceT(dim, keepDim) = 
-        let (struct (maxValues, indexes)) =tt.max(int64 dim, keepdim=keepDim)
+        let (struct (maxValues, indexes)) = tt.max(int64 dim, keepdim=keepDim)
         let newShape = Shape.checkCanMinMaxReduce dim keepDim t.Shape
         let maxValuesResult = t.MakeLike(maxValues, shape=newShape)
         let indexesResult = t.MakeLike(indexes, shape=newShape, dtype=Dtype.Int64).Cast(Dtype.Int32)
@@ -1456,8 +1457,8 @@ type TorchBackendTensorStatics() =
         | _ -> isSupported deviceType
 
     override _.Seed(seed) =
-        // TODO (important): we need to do *both* this Torch.SetSeed and CUDA SetSeed when device is GPU. CPU seed and CUDA seed are handled separately in torch and libtorch.
-        // However at the point of writing this comment, Cuda SetSeed was not available in TorchSharp
+        if torch_cuda.is_available() then
+            torch_cuda.manual_seed(int64 seed)  |> ignore
         torch.random.manual_seed(int64 seed)  |> ignore
 
     override _.Zero(dtype, device) =

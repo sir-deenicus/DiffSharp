@@ -78,14 +78,11 @@ By default in-branch testing is only done on CPU.  To enable on GPU/CUDA you mus
 
 1. Make sure you have a device eligible for CUDA 11.1 and all device drivers installed (e.g. install the appropriate NVIDIA CUDA SDK)
 
-2. Manually enable Torch CUDA binaries in `DiffSharp.Tests.fsproj` or set the `DIFFSHARP_TESTGPU` environment variable to `true` (e.g. `dotnet test /p:DIFFSHARP_TESTGPU=true`)
+2. Use `dotnet test /p:DIFFSHARP_TESTGPU=true`
 
-3. Verify that `dsharp.isCudaEnabled()` is returning true and GPU testing is enabled in `TestUtil.fs`.
-
-
+3. Verify that `dsharp.isCudaEnabled(Device.GPU)` is returning true and GPU testing is enabled in `TestUtil.fs`.
 
 ## Micro Performance Benchmarking 
-
 
 Python numbers must be collected in a separate run, they are currently injected back into source code (ugh)
 to get figures in one report.  There are better ways to do this.
@@ -102,3 +99,21 @@ To run benchmarks:
 
 To filter etc., see `--help`
 
+## TorchSharp backend on macos arm64
+
+In order to use TorchSharp backend on macOs arm64 platform:
+
+* you need to build TorchSharp from this PR: https://github.com/dotnet/TorchSharp/pull/903
+* you need to adjust according to "Building against locally built TorchSharp packages" section of this document
+
+At the time of this writing, there is one failing test and 327/328 passing:
+
+```
+The active test run was aborted. Reason: Test host process crashed : libc++abi: terminating due to uncaught exception of type c10::Error: "addmm_impl_cpu_" not implemented for 'Half'
+Exception raised from operator() at /tmp/pytorch-20230625-11028-1u2efwj/aten/src/ATen/native/LinearAlgebra.cpp:1433 (most recent call first):
+frame #0: c10::detail::torchCheckFail(char const*, char const*, unsigned int, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>> const&) + 92 (0x104c861c0 in libc10.dylib)
+frame #1: at::native::addmm_impl_cpu_(at::Tensor&, at::Tensor const&, at::Tensor, at::Tensor, c10::Scalar const&, c10::Scalar const&) + 4484 (0x3003161f4 in libtorch_cpu.dylib)
+frame #2: at::native::structured_mm_out_cpu::impl(at::Tensor const&, at::Tensor const&, at::Tensor const&) + 184 (0x300316704 in libtorch_cpu.dylib)
+frame #3: at::(anonymous namespace)::wrapper_CPU_mm(at::Tensor const&, at::Tensor const&) + 96 (0x300d0c7f8 in libtorch_cpu.dylib)
+...
+```
